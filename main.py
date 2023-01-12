@@ -19,7 +19,7 @@ YELLOW = (255, 255, 0)
 GREEN = (50, 255, 50)
 GRAY = (50, 50, 50)
 BLACK = (0, 0 ,0)
-FPS = 200
+FPS = 60
 u32 = ctypes.windll.user32
 size = (u32.GetSystemMetrics(0), u32.GetSystemMetrics(1)) # (1536, 864)
 screen = pygame.display.set_mode(size)
@@ -41,7 +41,7 @@ if True:
     golden_hammer.append(load_img("golden_hammer_back.png", (size[1]*7/26, size[1]*7/26)))
     golden_hammer.append(load_img("golden_hammer_front.png", (size[1]*8/13, size[1]*7/26)))
 
-    house = []
+    house:list[pygame.Surface] = []
     building_y = size[1]*2/39
     house_size = [166/139, 222/148, 260/155]
     for i in range(3):
@@ -49,7 +49,9 @@ if True:
     building = load_img("building.png", (building_y*112/146, building_y))
     hotel = load_img("hotel.png", (building_y*178/118, building_y))
     landmark = load_img("landmark.png", (building_y, building_y))
-    print(type(landmark))
+
+    gauge_img = pygame.image.load("./img/gauge.png")
+    bar = load_img("bar.png", (size[1]*8/13, size[1]/26))
     
     dice = []
     for i in range(6):
@@ -67,14 +69,14 @@ def write(txt, font_size, color, pos, criterion="center", bg_color=()):
     text_pos = text.get_rect()
     if criterion == "center":
         text_pos.center = pos
-    elif criterion == "top":
-        text_pos.top = pos
+    elif criterion == "midtop":
+        text_pos.midtop = pos
     elif criterion == "topleft":
         text_pos.topleft = pos
     elif criterion == "topright":
         text_pos.topright = pos
-    elif criterion == "bottom":
-        text_pos.bottom = pos
+    elif criterion == "midbottom":
+        text_pos.midbottom = pos
     elif criterion == "bottomleft":
         text_pos.bottomleft = pos
     elif criterion == "bottomright":
@@ -104,6 +106,24 @@ def cut_txt(text, font_size, max_len):
         else:
             break
     return text_list
+
+def print_img(img:pygame.Surface, coord, criterion="center"):
+    img_pos = img.get_rect()
+    if criterion == "center":
+        img_pos.center = coord
+    elif criterion == "top":
+        img_pos.top = coord
+    elif criterion == "topleft":
+        img_pos.topleft = coord
+    elif criterion == "topright":
+        img_pos.topright = coord
+    elif criterion == "bottom":
+        img_pos.bottom = coord
+    elif criterion == "bottomleft":
+        img_pos.bottomleft = coord
+    elif criterion == "bottomright":
+        img_pos.bottomright = coord
+    screen.blit(img, img_pos)
 
 def runGame():
     class City:
@@ -253,7 +273,7 @@ def runGame():
 
             if length[0] < 0 or length[1] < 0:
                 return False
-            if length[1] <= self.size[0] and length[1] <= self.size[1]:
+            if length[0] <= self.size[0] and length[1] <= self.size[1]:
                 return True
 
         def show(self):
@@ -358,8 +378,11 @@ def runGame():
         cities[pos].show_card(arrived)
         return True
 
-    def roll_dice():
+    def roll_dice(dice_num):
         dice_list = [list(range(6)), list(range(6))]
+        if dice_num[0] != dice_num[1]:
+            del dice_list[0][dice_num[0]]
+            del dice_list[1][dice_num[1]]
         return [random.choice(dice_list[0]), random.choice(dice_list[1])]
 
     def show_golden_task(card_num, task_done):
@@ -528,41 +551,87 @@ def runGame():
             write(content[i], size[1]//39, BLACK, (size[0]/2 - size[1]*7/26, size[1]*16/26 + size[1]*(i+1)/39), "topleft")
         return True
 
+    def show_gauge(gauge_func_x):
+        def gauge_func(x):
+            x = x-size[1]*16/13 if x >= size[1]*16/13 else x+gauge_speed/FPS
+            if x <= size[1]*8/13:
+                return x, size[1]*8/13-x
+            else:
+                return x, x-size[1]*8/13
+        @cache
+        def get_gauge_img(gauge_func_y):
+            gauge = pygame.transform.scale(gauge_img, (gauge_func_y, size[1]/26))
+            gauge_coord = gauge.get_rect()
+            return gauge, gauge_coord
+        
+        screen.blit(bar, (size[0]/2 - size[1]*4/13, size[1]*25/52))
+
+        gauge_func_x, gauge_func_y = gauge_func(gauge_func_x)
+        gauge, gauge_coord = get_gauge_img(gauge_func_y)
+        gauge_coord.topright = (size[0]/2 + size[1]*4/13, size[1]*25/52)
+        gauge.set_alpha(180)
+        screen.blit(gauge, gauge_coord)
+        return gauge_func_x, gauge_func_y
+
     fixed = False
-    turn = -1
+    turn = 0
     dice_num = [0, 0]
     show_dice = True
     roll = False
+    roll_t = time()
+    roll_for_sec = 3
+    charging = False
+    get_move_num = False
     move_num = 0
     move_t = time()
     golden_task_done = False
+    gauge_speed = size[1]*16/13
+    gauge_func_x = 0
+    gauge_func_y = 0
+
+    for i in range(len(players)):
+        players[i].name = f"team{i+1}"
 
     while True:
         clock.tick(FPS)
         screen.fill(WHITE)
 
-        screen.blit(board, (size[0]//2 - size[1]//2, 0))
+        print_img(board, (size[0]/2, size[1]/2))
         pressed_key = -1
+        pulled_key = -1
         clicked = False
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return 0
-            if event.type == pygame.KEYDOWN:
+            elif event.type == pygame.KEYDOWN:
                 pressed_key = event.key
-            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            elif event.type == pygame.KEYUP:
+                pulled_key = event.key
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 clicked = True
 
         # 키 입력에 대한 처리
         if pressed_key == pygame.K_ESCAPE:
             return 0
-        elif pressed_key == pygame.K_SPACE:
-            if move_num == 0:
-                roll = not roll
-                if not roll:
-                    move_num = dice_num[0] + dice_num[1] + 2
+        elif pressed_key == pygame.K_SLASH:
+            if move_num == 0 and not roll:
+                if show_dice:
+                    charging = True
+                    if dice_num[0] != dice_num[1]:
+                        turn += 1
+        elif pulled_key == pygame.K_SLASH:
+            if move_num == 0 and not roll:
+                if not show_dice:
+                    show_dice = True
+                else:
+                    roll_for_sec = 2.5*(1-gauge_func_y/(size[1]*8/13)) + 0.5
                     golden_task_done = False
-                    turn += 1
+                    charging = False
+                    gauge_func_x = 0
+                    roll = True
+                    roll_t = time()
+                    get_move_num = True
 
         # 보드판의 각 구역 클릭 시 정보 카드 고정
         if not fixed:
@@ -582,40 +651,62 @@ def runGame():
             move_num -= 1
             if players[turn%4].pos == 0:
                 players[turn%4].money += 10_0000 # 월급
+            if move_num == 0:
+                show_dice = False
+
+        if charging:
+            gauge_func_x, gauge_func_y = show_gauge(gauge_func_x)
 
         # 주사위 굴리기 및 보이기
         if roll:
-            dice_num = roll_dice()
-            show_dice = True
+            dice_num = roll_dice(dice_num)
+        if time() - roll_t >= roll_for_sec and get_move_num:
+            move_num = dice_num[0] + dice_num[1] + 2
+            get_move_num = False
+            roll = False
         if show_dice:
             screen.blit(dice[dice_num[0]], (size[0]/2 - size[1]*4/13, size[1]*7/13))
             screen.blit(dice[dice_num[1]], (size[0]/2 + size[1]/26, size[1]*7/13))
 
-        # 황금망치에 도착
-        if move_num == 0 and not roll and time()-move_t >= 0.5:
+        # ~~에 도착
+        if move_num == 0 and not show_dice:
+            # 황금망치에 도착
             if players[turn%4].pos in (5, 8, 12, 18, 22, 28, 35):
                 screen.blit(golden_hammer[1], (size[0]/2 - size[1]*4/13, size[1]*7/13))
                 golden_task_done = show_golden_task(5, golden_task_done)
                 show_dice = False
+            # 황금망치 이외의 특수 장소에 도착
             elif players[turn%4].pos%10 in (2, 5, 8):
                 pass
+            # 모서리에 도착
             elif players[turn%4].pos%10 == 0:
                 pass
+            # 도시에 도착
             else:
-                screen.blit(golden_hammer[1], (size[0]/2 - size[1]*4/13, size[1]*7/13))
+                screen.blit(golden_hammer[1], (size[0]/2 - size[1]*4/13, size[1]*21/39))
                 show_dice = False
 
                 building_state = cities[players[turn%4].pos].building_state
+                building_state = [1, 1, 0, 0, 0, 0]
                 if building_state == [0, 0, 0, 0, 0, 0, 0]:
                     pass
                 else:
+                    # 건물 가격
                     for i in range(3):
                         if building_state[i] == 1:
                             continue
                         else:
-                            screen.blit(house[i], (size[0]/2 - size[1]*7/26, size[1]*15/26))
+                            print_img(house[i], (size[0]/2, size[1]*23/39))
                             break
-                    screen.blit(building, (size[0]/2, size[1]*15/26))
+                    if building_state[2] == 1:
+                        print_img(landmark, (size[0]/2, size[1]*23/39))
+                    print_img(building, (size[0]/2, size[1]*35/52))
+                    print_img(hotel, (size[0]/2, size[1]*59/78))
+
+                    # 할인권 개수
+                    tmp_count = players[turn%4].state["building_10%_off"]
+                    write("건물 할인권", int(size[1]/39), BLACK, (size[0]/2 - size[1]*7/39, size[1]*9/13), "midtop")
+                    write(f"소유 : {tmp_count}", int(size[1]/39), BLACK, (size[0]/2 - size[1]*7/39, size[1]*19/26), "midtop")
 
         for player in players:
             player.show()
@@ -625,7 +716,12 @@ def runGame():
                 color = player.color
                 is_dark = 0.2126*color[0] + 0.7152*color[1] + 0.0722*color[2] < 127.5
                 txt_color = WHITE if is_dark else BLACK
-                write(f"{player.name}", 20, txt_color, cursor_coord, "bottomleft", player.color)
+                write(f"{player.name}", int(size[1]/39), txt_color, cursor_coord, "bottomleft", player.color)
+
+        try:
+            write(f"FPS : {int(clock.get_fps())}", 30, BLACK, (size[0], 0), "topright")
+        except:
+            pass
 
         pygame.display.update()
 
